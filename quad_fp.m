@@ -68,7 +68,7 @@ end
 %     0.125 -0.125 -0.125  0.125;
 %     0.0      0.0    0.0    0.0;
 % ];
-% 
+
 % % Moment of inertia tensor, kind of a guess
 % J = diag([0.5, 0.5, 1.0]);
 
@@ -84,7 +84,7 @@ function x_dot = quad_dynamics(x, u)
     % global arms_B;
     % global J;
 
-    hover_alpha = 0.5;
+    hover_alpha = 0.3;
     max_motor_speed_radps = 3000.0;
     min_motor_speed_radps = 0.0;
     
@@ -185,16 +185,28 @@ function [cineq, ceq] = constraints(z, nx, nu, T, x0, xT)
 
     ceq = [];
     ceq = [ceq; X(:, 1) - x0; X(:, end) - xT];
+    last_state_dynamics = quad_dynamics(X(:, end - 1), U(:, end));
+    ceq = [ceq; last_state_dynamics(4:6)];
+
+    % % Trapezoidal implicit integration
+    % for k = 1:N
+    %     f_k = quad_dynamics(X(:, k), U(:, k));
+    %     f_kp1 = quad_dynamics(X(:, k + 1), U(:, k));
+    % 
+    %     ceq = [ceq; X(:, k + 1) - X(:, k) - 0.5 * dt * (f_k + f_kp1)];
+    % end
 
     for k = 1:N
-        f_k = quad_dynamics(X(:, k), U(:, k));
-        f_kp1 = quad_dynamics(X(:, k + 1), U(:, k));
+        k1 = quad_dynamics(X(:, k), U(:, k));
+        k2 = quad_dynamics(X(:, k) + k1 * dt / 2, U(:, k));
+        k3 = quad_dynamics(X(:, k) + k2 * dt / 2, U(:, k));
+        k4 = quad_dynamics(X(:, k) + k3 * dt, U(:, k));
 
-        ceq = [ceq; X(:, k + 1) - X(:, k) - 0.5 * dt * (f_k + f_kp1)];
+        ceq = [ceq; X(:, k + 1) - X(:, k) - (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)];
     end
 
     % Individual motor commands must be between 0 and 1
-    cineq = [-U; U - 1.0];
+    cineq = [-U; U - 1];
 end
 
 %% Plotting function
@@ -203,30 +215,90 @@ function plot_results(X,U,T)
     tX = linspace(0,T,N+1);
     tU = linspace(0,T,N);
     
-    figure
+    figure(1)
     subplot(4,1,1)
-    plot(tX,X(1,:),'LineWidth',3); grid on
-    ylabel('$x$','Interpreter','latex')
-    
-    subplot(4,1,2)
-    plot(tX,X(2,:),'LineWidth',3); grid on
-    ylabel('$y$','Interpreter','latex')
-    
-    subplot(4,1,2)
-    plot(tX,X(3,:),'LineWidth',3); grid on
-    ylabel('$z$','Interpreter','latex')
-    
-    subplot(4,1,4)
     stairs(tU,U(1, :),'LineWidth',3); grid on;
     ylabel('$u$','Interpreter','latex')
     xlabel('time')
-    
+
+    subplot(4,1,2)
+    stairs(tU,U(2, :),'LineWidth',3); grid on;
+    ylabel('$u$','Interpreter','latex')
+    xlabel('time')
+
+    subplot(4,1,3)
+    stairs(tU,U(3, :),'LineWidth',3); grid on;
+    ylabel('$u$','Interpreter','latex')
+    xlabel('time')
+
+    subplot(4,1,4)
+    stairs(tU,U(4, :),'LineWidth',3); grid on;
+    ylabel('$u$','Interpreter','latex')
+    xlabel('time')
+
+    % Each column is the location of the end of an arm in body frame
+    arms_B = [
+        0.125  0.125 -0.125 -0.125;
+        0.125 -0.125 -0.125  0.125;
+        0.0      0.0    0.0    0.0;
+    ];
+
+    figure(2)
+    % subplot(1,1,1)
+    % plot(tX,X(1,:),'LineWidth',3); grid on
+    % ylabel('$x$','Interpreter','latex')
+    % 
+    % subplot(4,1,2)
+    % plot(tX,X(2,:),'LineWidth',3); grid on
+    % ylabel('$y$','Interpreter','latex')
+    % 
+    % subplot(4,1,3)
+    % plot(tX,X(3,:),'LineWidth',3); grid on
+    % ylabel('$z$','Interpreter','latex')
+
+    plot3(X(1,:), X(2,:), X(3,:), 'LineWidth', 3); grid on; hold on;
+
+    positions = X(1:3, :);
+    rpy_rads = X(7:9, :);
+    disp('size of rpy rads')
+    disp(size(rpy_rads))
+
+    m1_positions = [];
+    m2_positions = [];
+    m3_positions = [];
+    m4_positions = [];
+    for k = 1:3:(N + 1)
+        rpy_rad = rpy_rads(:, k);
+        R_B_to_W = rot_B_to_W(rpy_rad(1), rpy_rad(2), rpy_rad(3));
+        disp(R_B_to_W * arms_B(:, 1) + positions(:, k));
+        m1_positions = [m1_positions, R_B_to_W * arms_B(:, 1) + positions(:, k)];
+        m2_positions = [m2_positions, R_B_to_W * arms_B(:, 2) + positions(:, k)];
+        m3_positions = [m3_positions, R_B_to_W * arms_B(:, 3) + positions(:, k)];
+        m4_positions = [m4_positions, R_B_to_W * arms_B(:, 4) + positions(:, k)];
+    end
+
+    plot3(m1_positions(1, :), m1_positions(2, :), m1_positions(3, :), '--'); hold on;
+    plot3(m2_positions(1, :), m2_positions(2, :), m2_positions(3, :), '--'); hold on;
+    plot3(m3_positions(1, :), m3_positions(2, :), m3_positions(3, :), '--'); hold on;
+    plot3(m4_positions(1, :), m4_positions(2, :), m4_positions(3, :), '--'); hold on;
+
+    scatter3(m1_positions(1, :), m1_positions(2, :), m1_positions(3, :)); hold on;
+    scatter3(m2_positions(1, :), m2_positions(2, :), m2_positions(3, :)); hold on;
+    scatter3(m3_positions(1, :), m3_positions(2, :), m3_positions(3, :)); hold on;
+    scatter3(m4_positions(1, :), m4_positions(2, :), m4_positions(3, :)); 
+
+    xlim([-0.5, 2.5]);
+    ylim([-0.5, 2.5]);
+    zlim([-2.5, .5]);
+
+    ylabel('drone position over time')
+
     fontsize(18,"points")
 end
 
 %% Optimization parameters
-N = 100;
-T = 3;
+N = 45;
+T = 1;
 dt = T / N;
 
 nx = 12;
@@ -236,15 +308,19 @@ nu = 4;
 x0 = zeros(12, 1);
 xT = zeros(12, 1);
 xT(1) = 1;
-xT(2) = 1;
-xT(3) = 1;
+xT(2) = 0;
+xT(3) = 0;
+xT(9) = pi/2;
 
 z0 = zeros(nx * (N + 1) + nu * N, 1);
 
 % Initial guess: linear interpolation
 for k = 0:N
-    z0(nx*k+1:nx*(k+1)) = x0 + (k/N)*(xT-x0);
+    z0(nx*k + 1: nx*(k + 1)) = x0 + (k/N)*(xT-x0);
 end
+
+% Try setting control input to half
+z0(nx*(k + 1) + 1:end) = 0.5;
 
 %% Solve NLP
 
@@ -252,7 +328,13 @@ end
 options = optimoptions('fmincon', ...
     'Algorithm','sqp', ...
     'Display','iter', ...
-    'MaxFunctionEvaluations',5e5);
+    'MaxFunctionEvaluations',2e4);
+% options = optimoptions('fmincon', ...
+%     'Algorithm','interior-point', ...
+%     'EnableFeasibilityMode', true, ...
+%     'Display','iter', ...
+%     'SubproblemAlgorithm', 'cg', ...
+%     'MaxFunctionEvaluations',1e5);
 
 tic
 
@@ -263,6 +345,6 @@ t = toc;
 [X,U] = unpack(z,nx,nu);
 % Plotting
 plot_results(X,U,T)
-subplot(3,1,1)
-title(['Collocation, cost = ' num2str(cost_coll) ', time = ' num2str(t) '[s]'],FontSize=18)
+% subplot(4,1,1)
+title(['Collocation, cost = ' num2str(cost_val) ', time = ' num2str(t) '[s]'],FontSize=18)
 
