@@ -10,6 +10,7 @@ end
 
 %% Pack named states into one state vector
 function x = pack_states(pos_W, vel_W, rpy_rad, ang_vel_B)
+    % disp(size(ang_vel_B))
     x = zeros(12, 1);
     x(1:3) = pos_W;
     x(4:6) = vel_W;
@@ -23,7 +24,8 @@ function [X, U] = unpack(z, nx, nu)
     N = (length(z) - nx) / (nx + nu); % Substracting final state cost first
 
     X = reshape(z(1: nx*(N + 1)), nx, N + 1);
-    U = z(nx * (N + 1) + 1:end);
+    % U = z(nx * (N + 1) + 1:end);
+    U = reshape(z(nx * (N + 1) + 1:end), nu, N);
 end
 
 %% Rotate from body frame to world frame (FRD to NED matrix from RPY in radians)
@@ -31,7 +33,7 @@ function R_B_to_W = rot_B_to_W(roll, pitch, yaw)
     sphi = sin(roll);
     cphi = cos(roll);
     stheta = sin(pitch);
-    ctheta = cos(theta);
+    ctheta = cos(pitch);
     spsi = sin(yaw);
     cpsi = cos(yaw);
 
@@ -50,39 +52,60 @@ function R_B_to_W = rot_B_to_W(roll, pitch, yaw)
 end
 
 %% Quadrotor parameters
-hover_alpha = 0.5;
-max_motor_speed_radps = 3000.0;
-min_motor_speed_radps = 0.0;
-
-mass_kg = 0.25;
-k_thrust = mass_kg * 9.81 / (4.0 * (hover_alpha * max_motor_speed_radps)^2);
-c_lin_drag = 0.2;
-k_torque = 2.163 / 100000;
-c_ang_drag = 0.1;
-
-% Each column is the location of the end of an arm in body frame
-arms_B = [
-    0.125  0.125 -0.125 -0.125;
-    0.125 -0.125 -0.125  0.125;
-    0.0      0.0    0.0    0.0;
-];
-
-% Moment of inertia tensor, kind of a guess
-J = diag([0.5, 0.5, 1.0]);
+% hover_alpha = 0.5;
+% max_motor_speed_radps = 3000.0;
+% min_motor_speed_radps = 0.0;
+% 
+% mass_kg = 0.25;
+% k_thrust = mass_kg * 9.81 / (4.0 * (hover_alpha * max_motor_speed_radps)^2);
+% c_lin_drag = 0.2;
+% k_torque = 2.163 / 100000;
+% c_ang_drag = 0.1;
+% 
+% % Each column is the location of the end of an arm in body frame
+% arms_B = [
+%     0.125  0.125 -0.125 -0.125;
+%     0.125 -0.125 -0.125  0.125;
+%     0.0      0.0    0.0    0.0;
+% ];
+% 
+% % Moment of inertia tensor, kind of a guess
+% J = diag([0.5, 0.5, 1.0]);
 
 %% Quadrotor dynamics
 function x_dot = quad_dynamics(x, u)
-    global max_motor_speed_radps;
-    global min_motor_speed_radps;
-    global mass_kg;
-    global k_thrust;
-    global c_lin_drag;
-    global k_torque;
-    global c_ang_drag;
-    global arms_B;
-    global J;
+    % global max_motor_speed_radps;
+    % global min_motor_speed_radps;
+    % global mass_kg;
+    % global k_thrust;
+    % global c_lin_drag;
+    % global k_torque;
+    % global c_ang_drag;
+    % global arms_B;
+    % global J;
+
+    hover_alpha = 0.5;
+    max_motor_speed_radps = 3000.0;
+    min_motor_speed_radps = 0.0;
+    
+    mass_kg = 0.25;
+    k_thrust = mass_kg * 9.81 / (4.0 * (hover_alpha * max_motor_speed_radps)^2);
+    c_lin_drag = 0.2;
+    k_torque = 2.163 / 100000;
+    c_ang_drag = 0.1;
+    
+    % Each column is the location of the end of an arm in body frame
+    arms_B = [
+        0.125  0.125 -0.125 -0.125;
+        0.125 -0.125 -0.125  0.125;
+        0.0      0.0    0.0    0.0;
+    ];
+    
+    % Moment of inertia tensor, kind of a guess
+    J = diag([0.5, 0.5, 1.0]);
 
     [pos_W, vel_W, rpy_rad, ang_vel_B] = unpack_state(x);
+    % disp(size(u))
     motor_speeds = u * max_motor_speed_radps;
     R_B_to_W = rot_B_to_W(rpy_rad(1), rpy_rad(2), rpy_rad(3));
 
@@ -94,14 +117,14 @@ function x_dot = quad_dynamics(x, u)
     ang_vel_B_dot = zeros(3, 1);
 
     % Gravity and quadratic velocity drag
-    vel_W_dot = (1.0 / mass_kg) * ([0 0 -9.81]' - c_lin_drag * vel_W * norm(vel_W));
+    vel_W_dot = (1.0 / mass_kg) * ([0; 0; -9.81] - c_lin_drag * vel_W * norm(vel_W));
 
     % Motor forces in world frame
     motor_force = zeros(3, 1);
     for i = 1:4
         motor_force = motor_force + R_B_to_W * ([0 0 k_thrust * motor_speeds(i)^2]');
     end
-    vel_W_dot = vel_W_dot + motor_force / mass;
+    vel_W_dot = vel_W_dot + motor_force / mass_kg;
 
     pos_W_dot = vel_W;
 
@@ -114,11 +137,15 @@ function x_dot = quad_dynamics(x, u)
 
     % Body frame torque from applying forces on levers about the CM
     for i = 1:4
-        thrust_B_i = (1 / mass_kg) * [0 0 k_thrust * motor_speeds(i)^2];
+        thrust_B_i = (1 / mass_kg) * [0; 0; k_thrust * motor_speeds(i)^2];
         torque_B = torque_B + cross(arms_B(:, i), thrust_B_i);
     end
 
     ang_vel_B_dot = inv(J) * (cross(-ang_vel_B, J * ang_vel_B) + torque_B - c_ang_drag * ang_vel_B * norm(ang_vel_B));
+    % disp("main cross product")
+    % disp(size(cross(-ang_vel_B, J * ang_vel_B)))
+    % disp("torque_b")
+    % disp(size(torque_B))
 
     rpy_rad_dot(1) = ang_vel_B(1) + sin(rpy_rad(1)) * tan(rpy_rad(2)) * ang_vel_B(2) + cos(rpy_rad(1)) * tan(rpy_rad(2)) * ang_vel_B(3);
     rpy_rad_dot(2) = cos(rpy_rad(1)) * ang_vel_B(2) - sin(rpy_rad(1)) * ang_vel_B(3);
@@ -135,10 +162,11 @@ function J = cost(z, nx, nu, T)
     % T:    final time
 
     [~, U] = unpack(z, nx, nu);
+    U_flat = reshape(U, 1, []);
     N = length(U);
     dt = T / N;
 
-    J = dt * sum(U.^2);
+    J = dt * sum(U_flat.^2);
 end
 
 %% Constaints
@@ -159,10 +187,10 @@ function [cineq, ceq] = constraints(z, nx, nu, T, x0, xT)
     ceq = [ceq; X(:, 1) - x0; X(:, end) - xT];
 
     for k = 1:N
-        f_k = quad_dynamics(X(:, k), U(k));
-        f_kp1 = quad_dynamics(X(:, k + 1), U(k));
+        f_k = quad_dynamics(X(:, k), U(:, k));
+        f_kp1 = quad_dynamics(X(:, k + 1), U(:, k));
 
-        ceq = [ceq; X(:, k + 1) - x(:, k) - 0.5 * dt * (f_k + f_kp1)];
+        ceq = [ceq; X(:, k + 1) - X(:, k) - 0.5 * dt * (f_k + f_kp1)];
     end
 
     % Individual motor commands must be between 0 and 1
@@ -176,16 +204,20 @@ function plot_results(X,U,T)
     tU = linspace(0,T,N);
     
     figure
-    subplot(3,1,1)
+    subplot(4,1,1)
     plot(tX,X(1,:),'LineWidth',3); grid on
-    ylabel('$\theta$','Interpreter','latex')
+    ylabel('$x$','Interpreter','latex')
     
-    subplot(3,1,2)
+    subplot(4,1,2)
     plot(tX,X(2,:),'LineWidth',3); grid on
-    ylabel('$\dot{\theta}$','Interpreter','latex')
+    ylabel('$y$','Interpreter','latex')
     
-    subplot(3,1,3)
-    stairs(tU,U,'LineWidth',3); grid on;
+    subplot(4,1,2)
+    plot(tX,X(3,:),'LineWidth',3); grid on
+    ylabel('$z$','Interpreter','latex')
+    
+    subplot(4,1,4)
+    stairs(tU,U(1, :),'LineWidth',3); grid on;
     ylabel('$u$','Interpreter','latex')
     xlabel('time')
     
@@ -194,7 +226,7 @@ end
 
 %% Optimization parameters
 N = 100;
-T = 5;
+T = 3;
 dt = T / N;
 
 nx = 12;
