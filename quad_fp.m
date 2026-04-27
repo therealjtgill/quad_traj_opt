@@ -10,7 +10,6 @@ end
 
 %% Pack named states into one state vector
 function x = pack_states(pos_W, vel_W, rpy_rad, ang_vel_B)
-    % disp(size(ang_vel_B))
     x = zeros(12, 1);
     x(1:3) = pos_W;
     x(4:6) = vel_W;
@@ -20,11 +19,9 @@ end
 
 %% Unpack state and input from decision vector
 function [X, U] = unpack(z, nx, nu)
-    % Computing horizon length
-    N = (length(z) - nx) / (nx + nu); % Substracting final state cost first
-
+    % Horizon length
+    N = (length(z) - nx) / (nx + nu); % Exclude final state
     X = reshape(z(1: nx*(N + 1)), nx, N + 1);
-    % U = z(nx * (N + 1) + 1:end);
     U = reshape(z(nx * (N + 1) + 1:end), nu, N);
 end
 
@@ -74,16 +71,6 @@ end
 
 %% Quadrotor dynamics
 function x_dot = quad_dynamics(x, u)
-    % global max_motor_speed_radps;
-    % global min_motor_speed_radps;
-    % global mass_kg;
-    % global k_thrust;
-    % global c_lin_drag;
-    % global k_torque;
-    % global c_ang_drag;
-    % global arms_B;
-    % global J;
-
     hover_alpha = 0.3;
     max_motor_speed_radps = 3000.0;
     min_motor_speed_radps = 0.0;
@@ -105,12 +92,9 @@ function x_dot = quad_dynamics(x, u)
     J = diag([0.5, 0.5, 1.0]);
 
     [pos_W, vel_W, rpy_rad, ang_vel_B] = unpack_state(x);
-    % disp(size(u))
     motor_speeds = u * max_motor_speed_radps;
     R_B_to_W = rot_B_to_W(rpy_rad(1), rpy_rad(2), rpy_rad(3));
 
-    % x_dot = zeros(12, 1);
-    % [pos_W_dot, vel_W_dot, rpy_rad_dot, ang_vel_B_dot] = unpack_state(x_dot);
     pos_W_dot = zeros(3, 1);
     vel_W_dot = zeros(3, 1);
     rpy_rad_dot = zeros(3, 1);
@@ -141,11 +125,8 @@ function x_dot = quad_dynamics(x, u)
         torque_B = torque_B + cross(arms_B(:, i), thrust_B_i);
     end
 
+    % Angular acceleration in body frame
     ang_vel_B_dot = inv(J) * (cross(-ang_vel_B, J * ang_vel_B) + torque_B - c_ang_drag * ang_vel_B * norm(ang_vel_B));
-    % disp("main cross product")
-    % disp(size(cross(-ang_vel_B, J * ang_vel_B)))
-    % disp("torque_b")
-    % disp(size(torque_B))
 
     rpy_rad_dot(1) = ang_vel_B(1) + sin(rpy_rad(1)) * tan(rpy_rad(2)) * ang_vel_B(2) + cos(rpy_rad(1)) * tan(rpy_rad(2)) * ang_vel_B(3);
     rpy_rad_dot(2) = cos(rpy_rad(1)) * ang_vel_B(2) - sin(rpy_rad(1)) * ang_vel_B(3);
@@ -169,7 +150,7 @@ function J = cost(z, nx, nu, T)
     J = dt * sum(U_flat.^2);
 end
 
-%% Constaints
+%% Constraints
 function [cineq, ceq] = constraints(z, nx, nu, T, x0, xT)
     % z:    decision variables
     % nx:   size of state variables
@@ -205,7 +186,8 @@ function [cineq, ceq] = constraints(z, nx, nu, T, x0, xT)
         ceq = [ceq; X(:, k + 1) - X(:, k) - (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)];
     end
 
-    % Individual motor commands must be between 0 and 1
+    % Individual motor commands must be between 0 and 1 (motors can't spin
+    % backwards)
     cineq = [-U; U - 1];
 end
 
@@ -215,6 +197,7 @@ function plot_results(X,U,T)
     tX = linspace(0,T,N+1);
     tU = linspace(0,T,N);
     
+    % Motor commands
     figure(1)
     subplot(4,1,1)
     stairs(tU,U(1, :),'LineWidth',3); grid on;
@@ -243,34 +226,20 @@ function plot_results(X,U,T)
         0.0      0.0    0.0    0.0;
     ];
 
+    % Sampled drone locations
     figure(2)
-    % subplot(1,1,1)
-    % plot(tX,X(1,:),'LineWidth',3); grid on
-    % ylabel('$x$','Interpreter','latex')
-    % 
-    % subplot(4,1,2)
-    % plot(tX,X(2,:),'LineWidth',3); grid on
-    % ylabel('$y$','Interpreter','latex')
-    % 
-    % subplot(4,1,3)
-    % plot(tX,X(3,:),'LineWidth',3); grid on
-    % ylabel('$z$','Interpreter','latex')
-
     plot3(X(1,:), X(2,:), X(3,:), 'LineWidth', 3); grid on; hold on;
 
     positions = X(1:3, :);
     rpy_rads = X(7:9, :);
-    disp('size of rpy rads')
-    disp(size(rpy_rads))
-
     m1_positions = [];
     m2_positions = [];
     m3_positions = [];
     m4_positions = [];
-    for k = 1:3:(N + 1)
+    for k = 1:1:(N + 1)
         rpy_rad = rpy_rads(:, k);
         R_B_to_W = rot_B_to_W(rpy_rad(1), rpy_rad(2), rpy_rad(3));
-        disp(R_B_to_W * arms_B(:, 1) + positions(:, k));
+        % disp(R_B_to_W * arms_B(:, 1) + positions(:, k));
         m1_positions = [m1_positions, R_B_to_W * arms_B(:, 1) + positions(:, k)];
         m2_positions = [m2_positions, R_B_to_W * arms_B(:, 2) + positions(:, k)];
         m3_positions = [m3_positions, R_B_to_W * arms_B(:, 3) + positions(:, k)];
@@ -287,6 +256,23 @@ function plot_results(X,U,T)
     scatter3(m3_positions(1, :), m3_positions(2, :), m3_positions(3, :)); hold on;
     scatter3(m4_positions(1, :), m4_positions(2, :), m4_positions(3, :)); 
 
+    for k = 1:3:(N + 1)
+        rpy_rad = rpy_rads(:, k);
+        R_B_to_W = rot_B_to_W(rpy_rad(1), rpy_rad(2), rpy_rad(3));
+        m1_position = R_B_to_W * arms_B(:, 1) + positions(:, k);
+        arm_line = [m1_position, positions(:, k)];
+        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
+        m2_position = R_B_to_W * arms_B(:, 2) + positions(:, k);
+        arm_line = [m2_position, positions(:, k)];
+        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
+        m3_position = R_B_to_W * arms_B(:, 3) + positions(:, k);
+        arm_line = [m3_position, positions(:, k)];
+        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
+        m4_position = R_B_to_W * arms_B(:, 4) + positions(:, k);
+        arm_line = [m4_position, positions(:, k)];
+        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
+    end
+
     xlim([-0.5, 2.5]);
     ylim([-0.5, 2.5]);
     zlim([-2.5, .5]);
@@ -298,7 +284,7 @@ end
 
 %% Optimization parameters
 N = 45;
-T = 1;
+T = 3;
 dt = T / N;
 
 nx = 12;
@@ -307,10 +293,11 @@ nu = 4;
 % Boundary conditions
 x0 = zeros(12, 1);
 xT = zeros(12, 1);
-xT(1) = 1;
+xT(1) = 0;
 xT(2) = 0;
 xT(3) = 0;
-xT(9) = pi/2;
+xT(8) = pi*2;
+xT(9) = 0;
 
 z0 = zeros(nx * (N + 1) + nu * N, 1);
 
@@ -319,16 +306,25 @@ for k = 0:N
     z0(nx*k + 1: nx*(k + 1)) = x0 + (k/N)*(xT-x0);
 end
 
-% Try setting control input to half
+% Position initialization just for the 360 flip
+for k = 0:N
+    if k < 2N
+        z0(nx*k + 1: nx*k + 3) = [0 0 10 * 2 * k / N]';
+    else
+        z0(nx*k + 1: nx*k + 3) = [0 0 10 * 2 * k / N - 10 * (k - N) / (2 * N)]';
+    end
+end
+
+% Set control input to half throttle for all motors
 z0(nx*(k + 1) + 1:end) = 0.5;
 
-%% Solve NLP
+%% Solve NLP and make plots
 
 % Optimizer settings
 options = optimoptions('fmincon', ...
     'Algorithm','sqp', ...
     'Display','iter', ...
-    'MaxFunctionEvaluations',2e4);
+    'MaxFunctionEvaluations',3e5);
 % options = optimoptions('fmincon', ...
 %     'Algorithm','interior-point', ...
 %     'EnableFeasibilityMode', true, ...
@@ -341,7 +337,7 @@ tic
 [z, cost_val] = fmincon(@(z) cost(z, nu, nu, T), z0, [], [], [], [], [], [], @(z) constraints(z, nx, nu, T, x0, xT), options);
 t = toc;
 
-% Extracting state and input trajectories
+% Extract state and input trajectories
 [X,U] = unpack(z,nx,nu);
 % Plotting
 plot_results(X,U,T)
