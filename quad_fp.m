@@ -1,5 +1,5 @@
 clear all; clc;
-
+%% https://www.mathworks.com/help/matlab/creating_plots/animation-techniques-1.html
 %% Unpack named states from state vector
 function [pos_W, vel_W, rpy_rad, ang_vel_B] = unpack_state(x)
     pos_W = x(1:3);
@@ -25,28 +25,6 @@ function [X, U] = unpack(z, nx, nu)
     U = reshape(z(nx * (N + 1) + 1:end), nu, N);
 end
 
-%% Rotate from body frame to world frame (FRD to NED matrix from RPY in radians)
-function R_B_to_W = rot_B_to_W(roll, pitch, yaw)
-    sphi = sin(roll);
-    cphi = cos(roll);
-    stheta = sin(pitch);
-    ctheta = cos(pitch);
-    spsi = sin(yaw);
-    cpsi = cos(yaw);
-
-    R_B_to_W = zeros(3,3);
-    R_B_to_W(1, 1) = ctheta * cpsi;
-    R_B_to_W(1, 2) = sphi * stheta * cpsi - cphi * spsi;
-    R_B_to_W(1, 3) = cphi * stheta * cpsi + sphi * spsi;
-    
-    R_B_to_W(2, 1) = ctheta * spsi;
-    R_B_to_W(2, 2) = sphi * stheta * spsi + cphi * cpsi;
-    R_B_to_W(2, 3) = cphi * stheta * spsi - sphi * cpsi;
-    
-    R_B_to_W(3, 1) = -stheta;
-    R_B_to_W(3, 2) = sphi * ctheta;
-    R_B_to_W(3, 3) = cphi * ctheta;
-end
 
 %% Quadrotor parameters
 % hover_alpha = 0.5;
@@ -191,96 +169,6 @@ function [cineq, ceq] = constraints(z, nx, nu, T, x0, xT)
     cineq = [-U; U - 1];
 end
 
-%% Plotting function
-function plot_results(X,U,T)
-    N = length(U);
-    tX = linspace(0,T,N+1);
-    tU = linspace(0,T,N);
-    
-    % Motor commands
-    figure(1)
-    subplot(4,1,1)
-    stairs(tU,U(1, :),'LineWidth',3); grid on;
-    ylabel('$u$','Interpreter','latex')
-    xlabel('time')
-
-    subplot(4,1,2)
-    stairs(tU,U(2, :),'LineWidth',3); grid on;
-    ylabel('$u$','Interpreter','latex')
-    xlabel('time')
-
-    subplot(4,1,3)
-    stairs(tU,U(3, :),'LineWidth',3); grid on;
-    ylabel('$u$','Interpreter','latex')
-    xlabel('time')
-
-    subplot(4,1,4)
-    stairs(tU,U(4, :),'LineWidth',3); grid on;
-    ylabel('$u$','Interpreter','latex')
-    xlabel('time')
-
-    % Each column is the location of the end of an arm in body frame
-    arms_B = [
-        0.125  0.125 -0.125 -0.125;
-        0.125 -0.125 -0.125  0.125;
-        0.0      0.0    0.0    0.0;
-    ];
-
-    % Sampled drone locations
-    figure(2)
-    plot3(X(1,:), X(2,:), X(3,:), 'LineWidth', 3); grid on; hold on;
-
-    positions = X(1:3, :);
-    rpy_rads = X(7:9, :);
-    m1_positions = [];
-    m2_positions = [];
-    m3_positions = [];
-    m4_positions = [];
-    for k = 1:1:(N + 1)
-        rpy_rad = rpy_rads(:, k);
-        R_B_to_W = rot_B_to_W(rpy_rad(1), rpy_rad(2), rpy_rad(3));
-        % disp(R_B_to_W * arms_B(:, 1) + positions(:, k));
-        m1_positions = [m1_positions, R_B_to_W * arms_B(:, 1) + positions(:, k)];
-        m2_positions = [m2_positions, R_B_to_W * arms_B(:, 2) + positions(:, k)];
-        m3_positions = [m3_positions, R_B_to_W * arms_B(:, 3) + positions(:, k)];
-        m4_positions = [m4_positions, R_B_to_W * arms_B(:, 4) + positions(:, k)];
-    end
-
-    plot3(m1_positions(1, :), m1_positions(2, :), m1_positions(3, :), '--'); hold on;
-    plot3(m2_positions(1, :), m2_positions(2, :), m2_positions(3, :), '--'); hold on;
-    plot3(m3_positions(1, :), m3_positions(2, :), m3_positions(3, :), '--'); hold on;
-    plot3(m4_positions(1, :), m4_positions(2, :), m4_positions(3, :), '--'); hold on;
-
-    scatter3(m1_positions(1, :), m1_positions(2, :), m1_positions(3, :)); hold on;
-    scatter3(m2_positions(1, :), m2_positions(2, :), m2_positions(3, :)); hold on;
-    scatter3(m3_positions(1, :), m3_positions(2, :), m3_positions(3, :)); hold on;
-    scatter3(m4_positions(1, :), m4_positions(2, :), m4_positions(3, :)); 
-
-    for k = 1:3:(N + 1)
-        rpy_rad = rpy_rads(:, k);
-        R_B_to_W = rot_B_to_W(rpy_rad(1), rpy_rad(2), rpy_rad(3));
-        m1_position = R_B_to_W * arms_B(:, 1) + positions(:, k);
-        arm_line = [m1_position, positions(:, k)];
-        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
-        m2_position = R_B_to_W * arms_B(:, 2) + positions(:, k);
-        arm_line = [m2_position, positions(:, k)];
-        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
-        m3_position = R_B_to_W * arms_B(:, 3) + positions(:, k);
-        arm_line = [m3_position, positions(:, k)];
-        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
-        m4_position = R_B_to_W * arms_B(:, 4) + positions(:, k);
-        arm_line = [m4_position, positions(:, k)];
-        plot3(arm_line(1, :), arm_line(2, :), arm_line(3, :), 'black');
-    end
-
-    xlim([-0.5, 2.5]);
-    ylim([-0.5, 2.5]);
-    zlim([-2.5, .5]);
-
-    ylabel('drone position over time')
-
-    fontsize(18,"points")
-end
 
 %% Optimization parameters
 N = 45;
